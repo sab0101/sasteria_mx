@@ -1,5 +1,5 @@
 // ============================================================
-// CONFIGURACIÓN DE FIREBASE
+// TODO: PEGA AQUÍ TU CONFIGURACIÓN DE FIREBASE (ver instrucciones del chat)
 // ============================================================
 const firebaseConfig = {
   apiKey: "AIzaSyAgt-rnX-pjgJU6HFdeKak5iIL80f_Mvu4",
@@ -10,7 +10,6 @@ const firebaseConfig = {
   appId: "1:231548743088:web:5e23068ee90e1acbb7ba75",
   measurementId: "G-HH05T72XXJ"
 };
-
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -1005,7 +1004,12 @@ function renderConfig(){
     <textarea id="cfg_tiposInventario" rows="4" style="width:100%;padding:8px;">${(companyConfig.tiposInventario||[]).join('\n')}</textarea>
 
     <div class="note" style="margin-top:16px;">Cambiar el nombre de una sucursal no actualiza las órdenes ya guardadas con el nombre anterior — evita renombrar sucursales que ya tengan tickets.</div>
-    <div class="formfoot"><button class="btn gold" id="cfgSaveBtn" type="button">Guardar cambios</button></div>`;
+    <div class="formfoot"><button class="btn gold" id="cfgSaveBtn" type="button">Guardar cambios</button></div>
+
+    <div class="note" style="margin-top:32px;border-color:var(--red);background:var(--red-bg);color:var(--red);">
+      <b>Zona de peligro</b><br>Esto borra tu empresa y TODOS sus datos (órdenes, inventario, medidas, comisiones) de forma permanente. No se puede deshacer.
+    </div>
+    <button class="btn" id="deleteAccountBtn" type="button" style="margin-top:8px;background:var(--red);">🗑️ Eliminar mi cuenta y todos mis datos</button>`;
 }
 function renderCfgSedes(){
   document.getElementById('cfgSedesList').innerHTML = draftSedes.map((s,i)=>`
@@ -1040,6 +1044,55 @@ function attachConfigEvents(){
     await saveCompanyConfig({nombreEmpresa, ownerPin, tiposPrenda, tiposServicio, tiposInventario, sedes});
     renderRoot();
   });
+  document.getElementById('deleteAccountBtn').addEventListener('click', openDeleteAccountModal);
+}
+
+// ============================================================
+// ELIMINAR CUENTA (borra todos los datos de Firestore + el login)
+// ============================================================
+async function deleteAllCompanyData(){
+  const collections = ['orders','inventory','measurements'];
+  for(const col of collections){
+    const snap = await db.collection('companies').doc(companyId).collection(col).get();
+    await Promise.all(snap.docs.map(d => d.ref.delete()));
+  }
+  await db.collection('companies').doc(companyId).delete();
+}
+function openDeleteAccountModal(){
+  document.getElementById('modalBox').innerHTML = `
+    <h2 style="color:var(--red);">⚠️ Eliminar cuenta y todos los datos</h2>
+    <p style="color:var(--ink-soft);font-size:13px;">Esto borra permanentemente tu empresa, todas las órdenes, inventario, medidas y comisiones. <b>No se puede deshacer.</b></p>
+    <div class="formgrid">
+      <label class="full">Escribe tu contraseña para confirmar <input type="password" id="del_password"></label>
+      <label class="full">Escribe ELIMINAR para confirmar <input type="text" id="del_confirm"></label>
+    </div>
+    <div class="autherror" id="delError"></div>
+    <div class="formfoot">
+      <button class="btn ghost" id="cancelBtn" type="button">Cancelar</button>
+      <button class="btn" id="confirmDeleteBtn" type="button" style="background:var(--red);color:#fff;">Eliminar todo permanentemente</button>
+    </div>`;
+  document.getElementById('cancelBtn').addEventListener('click', () => document.getElementById('overlay').classList.remove('show'));
+  document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+    const pass = document.getElementById('del_password').value;
+    const confirmText = document.getElementById('del_confirm').value.trim();
+    const errEl = document.getElementById('delError');
+    errEl.textContent = '';
+    if(confirmText !== 'ELIMINAR'){ errEl.textContent = 'Escribe exactamente ELIMINAR (mayúsculas) para confirmar.'; return; }
+    if(!pass){ errEl.textContent = 'Escribe tu contraseña.'; return; }
+    const btn = document.getElementById('confirmDeleteBtn');
+    btn.textContent = 'Eliminando...'; btn.disabled = true;
+    try{
+      const credential = firebase.auth.EmailAuthProvider.credential(currentUser.email, pass);
+      await currentUser.reauthenticateWithCredential(credential);
+      await deleteAllCompanyData();
+      await currentUser.delete();
+      // auth.onAuthStateChanged se encarga de regresar a la pantalla de login
+    }catch(e){
+      errEl.textContent = traducirErrorFirebase(e);
+      btn.textContent = 'Eliminar todo permanentemente'; btn.disabled = false;
+    }
+  });
+  document.getElementById('overlay').classList.add('show');
 }
 
 // ============================================================
