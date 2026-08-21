@@ -19,7 +19,7 @@ const db = firebase.firestore();
 // ============================================================
 let currentUser = null, companyId = null, companyConfig = null;
 let orders = [], inventory = [], measurements = [];
-let currentView = "dashboard";
+let currentView = "ordenes";
 let editingId = null, editingMeasureId = null;
 let draftPrendas = [], draftPagos = [];
 let ownerUnlocked = false;
@@ -333,15 +333,38 @@ function setActiveNav(view){
   const titles = {dashboard:"Dashboard", ordenes:"Órdenes", inventario:"Inventario", medidas:"Medidas de clientes", comisiones:"Comisiones", config:"Configuración"};
   document.getElementById('pagetitle').textContent = titles[view];
 }
+function renderOwnerLock(){
+  return `<div class="lock"><h2>Acceso del dueño</h2>
+    <p style="color:var(--ink-soft);font-size:13px;">Esta sección solo debe verla el dueño del negocio.</p>
+    <input type="password" id="ownerPinInput" placeholder="PIN del dueño" style="width:100%;margin:14px 0;">
+    <div id="ownerLockError" style="color:var(--red);font-size:12px;height:16px;"></div>
+    <button class="btn gold" id="ownerLockBtn" style="width:100%;">Entrar</button>
+    <p style="color:var(--ink-soft);font-size:11px;margin-top:14px;">El PIN se define y se cambia en Configuración → Zona del dueño.</p>
+  </div>`;
+}
+function attachOwnerLockEvents(){
+  document.getElementById('ownerLockBtn').addEventListener('click', () => {
+    const val = document.getElementById('ownerPinInput').value;
+    if(val === (companyConfig.ownerPin || "0000")){ ownerUnlocked = true; render(); }
+    else document.getElementById('ownerLockError').textContent = "PIN incorrecto.";
+  });
+  document.getElementById('ownerPinInput').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('ownerLockBtn').click(); });
+}
 function render(){
   document.getElementById('todaylabel').textContent = "Hoy: " + new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});
   setActiveNav(currentView);
   const view = document.getElementById('view');
-  if(currentView === 'dashboard'){ view.innerHTML = renderDashboard(); attachDashboardEvents(); }
+  if(currentView === 'dashboard'){
+    if(!ownerUnlocked){ view.innerHTML = renderOwnerLock(); attachOwnerLockEvents(); }
+    else { view.innerHTML = renderDashboard(); attachDashboardEvents(); }
+  }
   else if(currentView === 'ordenes'){ view.innerHTML = renderOrdenes(); attachOrdenesEvents(); }
   else if(currentView === 'inventario'){ view.innerHTML = renderInventario(); attachInventarioEvents(); }
   else if(currentView === 'medidas'){ view.innerHTML = renderMedidas(); attachMedidasEvents(); }
-  else if(currentView === 'comisiones'){ view.innerHTML = renderComisiones(); attachComisionesEvents(); }
+  else if(currentView === 'comisiones'){
+    if(!ownerUnlocked){ view.innerHTML = renderOwnerLock(); attachOwnerLockEvents(); }
+    else { view.innerHTML = renderComisiones(); attachComisionesEvents(); }
+  }
   else if(currentView === 'config'){ view.innerHTML = renderConfig(); attachConfigEvents(); }
 }
 
@@ -368,6 +391,15 @@ function renderCorteCaja(){
     ${pagosDia.length===0 ? '<div class="note">Sin pagos registrados en esta fecha/sucursal.</div>' : ''}`;
 }
 function renderDashboard(){
+  if(!ownerUnlocked){
+    return `<div class="lock"><h2>Acceso del dueño</h2>
+      <p style="color:var(--ink-soft);font-size:13px;">El Dashboard (ingresos, comisiones, rankings) solo lo debe ver el dueño del negocio.</p>
+      <input type="password" id="dashOwnerPin" placeholder="PIN del dueño" style="width:100%;margin:14px 0;">
+      <div id="dashOwnerError" style="color:var(--red);font-size:12px;height:16px;"></div>
+      <button class="btn gold" id="dashUnlockBtn" style="width:100%;">Entrar</button>
+      <p style="color:var(--ink-soft);font-size:11px;margin-top:14px;">Mientras tanto, usa "Órdenes" para registrar tickets y prendas.</p>
+    </div>`;
+  }
   const pendientes = orders.filter(o => o.proceso !== "Terminado");
   const atrasadas = pendientes.filter(o => computeAlert(o).cls === "late");
   const hoy = pendientes.filter(o => computeAlert(o).cls === "today");
@@ -450,6 +482,15 @@ function renderDashboard(){
     </div>`;
 }
 function attachDashboardEvents(){
+  if(!ownerUnlocked){
+    document.getElementById('dashUnlockBtn').addEventListener('click', () => {
+      const val = document.getElementById('dashOwnerPin').value;
+      if(val === (companyConfig.ownerPin || "0000")){ ownerUnlocked = true; render(); }
+      else document.getElementById('dashOwnerError').textContent = "PIN incorrecto.";
+    });
+    document.getElementById('dashOwnerPin').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('dashUnlockBtn').click(); });
+    return;
+  }
   document.getElementById('dashMes').addEventListener('change', e => { window.__dashMes = e.target.value; render(); });
   document.getElementById('dashSede').addEventListener('change', e => { window.__dashSede = e.target.value; render(); });
   document.getElementById('cajaFecha').addEventListener('change', e => { window.__cajaFecha = e.target.value; render(); });
@@ -925,15 +966,6 @@ function openMeasureModal(id){
 // COMISIONES (gateado con el PIN del dueño, definido en Configuración)
 // ============================================================
 function renderComisiones(){
-  if(!ownerUnlocked){
-    return `<div class="lock"><h2>Acceso del dueño</h2>
-      <p style="color:var(--ink-soft);font-size:13px;">Esta sección solo debe verla el dueño del negocio.</p>
-      <input type="text" id="ownerPin" placeholder="PIN del dueño" style="width:100%;margin:14px 0;">
-      <div id="ownerError" style="color:var(--red);font-size:12px;height:16px;"></div>
-      <button class="btn gold" id="unlockBtn" style="width:100%;">Entrar</button>
-      <p style="color:var(--ink-soft);font-size:11px;margin-top:14px;">El PIN se define y se puede cambiar en Configuración.</p>
-    </div>`;
-  }
   const mesActual = todayStr().slice(0,7);
   let allStaff = [];
   (companyConfig.sedes||[]).forEach(s => (s.encargados||[]).forEach(n => allStaff.push({sede:s.nombre, nombre:n})));
@@ -960,15 +992,6 @@ function renderComisiones(){
     </table>`;
 }
 function attachComisionesEvents(){
-  if(!ownerUnlocked){
-    document.getElementById('unlockBtn').addEventListener('click', () => {
-      const val = document.getElementById('ownerPin').value;
-      if(val === (companyConfig.ownerPin || "0000")){ ownerUnlocked = true; render(); }
-      else document.getElementById('ownerError').textContent = "PIN incorrecto.";
-    });
-    document.getElementById('ownerPin').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('unlockBtn').click(); });
-    return;
-  }
   document.querySelectorAll('.pctinput').forEach(inp => {
     inp.addEventListener('change', async e => {
       const commissions = {...(companyConfig.commissions||{})};
@@ -988,7 +1011,6 @@ function renderConfig(){
   return `
     <div class="formgrid">
       <label class="full">Nombre de tu empresa <input type="text" id="cfg_nombre" value="${companyConfig.nombreEmpresa}"></label>
-      <label>PIN del dueño (para Comisiones) <input type="text" id="cfg_pin" value="${companyConfig.ownerPin||'0000'}" style="max-width:160px;"></label>
     </div>
     <h3 style="font-family:'Fraunces',serif;color:var(--navy-deep);margin-top:22px;">Sucursales</h3>
     <div id="cfgSedesList"></div>
@@ -1006,10 +1028,41 @@ function renderConfig(){
     <div class="note" style="margin-top:16px;">Cambiar el nombre de una sucursal no actualiza las órdenes ya guardadas con el nombre anterior — evita renombrar sucursales que ya tengan tickets.</div>
     <div class="formfoot"><button class="btn gold" id="cfgSaveBtn" type="button">Guardar cambios</button></div>
 
-    <div class="note" style="margin-top:32px;border-color:var(--red);background:var(--red-bg);color:var(--red);">
+    <h3 style="font-family:'Fraunces',serif;color:var(--navy-deep);margin-top:32px;border-top:1px dashed var(--line);padding-top:20px;">🔒 Zona del dueño</h3>
+    <div id="ownerZoneConfig"></div>`;
+}
+function renderOwnerZoneConfig(){
+  const box = document.getElementById('ownerZoneConfig');
+  if(!box) return;
+  if(!ownerUnlocked){
+    box.innerHTML = `
+      <p style="color:var(--ink-soft);font-size:13px;">El PIN y el borrado de cuenta solo los puede ver/cambiar quien tenga el PIN del dueño.</p>
+      <input type="password" id="cfgOwnerPin" placeholder="PIN del dueño" style="max-width:200px;">
+      <div id="cfgOwnerError" style="color:var(--red);font-size:12px;height:16px;margin-top:6px;"></div>
+      <button class="btn gold small" id="cfgUnlockBtn" type="button" style="margin-top:4px;">Desbloquear</button>`;
+    document.getElementById('cfgUnlockBtn').addEventListener('click', () => {
+      const val = document.getElementById('cfgOwnerPin').value;
+      if(val === (companyConfig.ownerPin || "0000")){ ownerUnlocked = true; renderOwnerZoneConfig(); }
+      else document.getElementById('cfgOwnerError').textContent = "PIN incorrecto.";
+    });
+    document.getElementById('cfgOwnerPin').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('cfgUnlockBtn').click(); });
+    return;
+  }
+  box.innerHTML = `
+    <div class="formgrid">
+      <label>PIN del dueño (para Comisiones) <input type="text" id="cfg_pin" value="${companyConfig.ownerPin||'0000'}" style="max-width:160px;"></label>
+    </div>
+    <div class="formfoot" style="justify-content:flex-start;"><button class="btn ghost small" id="cfgSavePinBtn" type="button">Guardar PIN</button></div>
+    <div class="note" style="margin-top:16px;border-color:var(--red);background:var(--red-bg);color:var(--red);">
       <b>Zona de peligro</b><br>Esto borra tu empresa y TODOS sus datos (órdenes, inventario, medidas, comisiones) de forma permanente. No se puede deshacer.
     </div>
     <button class="btn" id="deleteAccountBtn" type="button" style="margin-top:8px;background:var(--red);">🗑️ Eliminar mi cuenta y todos mis datos</button>`;
+  document.getElementById('cfgSavePinBtn').addEventListener('click', async () => {
+    const ownerPin = document.getElementById('cfg_pin').value.trim() || "0000";
+    await saveCompanyConfig({ownerPin});
+    alert("PIN actualizado.");
+  });
+  document.getElementById('deleteAccountBtn').addEventListener('click', openDeleteAccountModal);
 }
 function renderCfgSedes(){
   document.getElementById('cfgSedesList').innerHTML = draftSedes.map((s,i)=>`
@@ -1032,19 +1085,18 @@ function renderCfgSedes(){
 }
 function attachConfigEvents(){
   renderCfgSedes();
+  renderOwnerZoneConfig();
   document.getElementById('cfgAddSede').addEventListener('click', ()=>{ draftSedes.push({nombre:'',direccion:'',encargados:['']}); renderCfgSedes(); });
   document.getElementById('cfgSaveBtn').addEventListener('click', async () => {
     const nombreEmpresa = document.getElementById('cfg_nombre').value.trim();
-    const ownerPin = document.getElementById('cfg_pin').value.trim() || "0000";
     const tiposPrenda = document.getElementById('cfg_tiposPrenda').value.split('\n').map(x=>x.trim()).filter(Boolean);
     const tiposServicio = document.getElementById('cfg_tiposServicio').value.split('\n').map(x=>x.trim()).filter(Boolean);
     const tiposInventario = document.getElementById('cfg_tiposInventario').value.split('\n').map(x=>x.trim()).filter(Boolean);
     const sedes = draftSedes.filter(s=>s.nombre.trim()).map(s=>({...s, encargados:(s.encargados||[]).filter(Boolean)}));
     if(!nombreEmpresa || sedes.length===0){ alert("Necesitas un nombre de empresa y al menos una sucursal."); return; }
-    await saveCompanyConfig({nombreEmpresa, ownerPin, tiposPrenda, tiposServicio, tiposInventario, sedes});
+    await saveCompanyConfig({nombreEmpresa, tiposPrenda, tiposServicio, tiposInventario, sedes});
     renderRoot();
   });
-  document.getElementById('deleteAccountBtn').addEventListener('click', openDeleteAccountModal);
 }
 
 // ============================================================
